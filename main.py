@@ -2,9 +2,8 @@ import socket
 import threading
 import time
 
+# ==================== TCP-Server ====================
 def start_tcp_server(port):
-    """Start a TCP server with IAT calculation."""
-
     def server_thread():
         address_family = socket.AF_INET
         server_socket = socket.socket(address_family, socket.SOCK_STREAM)
@@ -17,14 +16,14 @@ def start_tcp_server(port):
         try:
             while True:
                 client_socket, client_address = server_socket.accept()
-                print(f"Connection from {client_address}")
+                print(f"\nConnection from {client_address}")
 
                 try:
                     # Initialize variables for IAT calculation
                     ref_time = None
-                    packet_count = 0
 
                     while True:
+                        packet_count = 0
                         # Receive a message from the client
                         message = client_socket.recv(1024).decode()
                         if not message:  # Client disconnected
@@ -36,19 +35,23 @@ def start_tcp_server(port):
                         if ref_time is None:
                             # First packet, no IAT calculation
                             ref_time = recv_time
-                            print(f"[Client: {client_address}] First packet received. No IAT calculated.")
-                            server_response = f"[P#{packet_count}] [S-IAT: null]\n"
+                            packet_count = 1
+                            print(f"[TCP-Server][P#{packet_count}] First packet: No IAT calculated.")
+                            print(f"[TCP-Client][P#{packet_count}] {message}.")
                         else:
                             # Calculate IAT
                             iat = recv_time - ref_time
                             ref_time = recv_time
                             packet_count += 1
-                            print(f"[Client: {client_address}] Received: {message}")
-                            print(f"[Client: {client_address}] Inter-Arrival-Time (IAT): {iat} ms")
-                            server_response = f"[P#{packet_count}] [S-IAT: {iat:.2f} ms]\n"
+                            print(f"[TCP-Server][P#{packet_count}] Inter-Arrival-Time (IAT): {iat} ms.")
+                            print(f"[TCP-Client][P#{packet_count}] {message}.")
 
                         # Respond to the client
-                        client_socket.sendall(server_response.encode())
+                        server_response = f"Messages acknowledged."
+                        try:
+                            client_socket.sendall(server_response.encode())
+                        except Exception as e:
+                            print(f"[TCP-Server] Error sending response to client: {e}")
 
                 except Exception as e:
                     print(f"Error while processing client messages: {e}")
@@ -63,9 +66,8 @@ def start_tcp_server(port):
 
     threading.Thread(target=server_thread, daemon=True).start()
 
+# ==================== UDP-Server ====================
 def start_udp_server(port):
-    """Start a UDP server with IAT calculation."""
-
     def server_thread():
         address_family = socket.AF_INET
         server_socket = socket.socket(address_family, socket.SOCK_DGRAM)
@@ -77,9 +79,9 @@ def start_udp_server(port):
         try:
             # Initialize variables
             ref_time = None
-            packet_count = 0
 
             while True:
+                packet_count = 0
                 # Receive a message and the client's address
                 message, client_address = server_socket.recvfrom(1024)
                 recv_time = time.time() * 1000  # Current time in milliseconds
@@ -90,20 +92,22 @@ def start_udp_server(port):
                     # First packet: no IAT calculation
                     ref_time = recv_time
                     packet_count = 1
-                    print(f"[Client: {client_address}] First packet received. No IAT calculated.")
-                    server_response = f"[P#{packet_count}] [IAT: null]\n{decoded_message}"
+                    print(f"[UDP-Server][P#{packet_count}] First packet: No IAT calculated.")
+                    print(f"[UDP-Client][P#{packet_count}] {message}.")
                 else:
                     # Calculate IAT for subsequent packets
                     iat = recv_time - ref_time
                     ref_time = recv_time
                     packet_count += 1
-                    print(f"[Client: {client_address}] Received: {decoded_message}")
-                    print(f"[Client: {client_address}] Inter-Arrival-Time (IAT): {iat:.2f} ms")
-                    server_response = f"[P#{packet_count}] [IAT: {iat:.2f} ms]\n{decoded_message}"
+                    print(f"[UDP-Server][P#{packet_count}] Inter-Arrival-Time (IAT): {iat} ms.")
+                    print(f"[UDP-Client][P#{packet_count}] {message}.")
 
                 # Respond to the client
-                server_socket.sendto(server_response.encode(), client_address)
-                print(f"Response sent to {client_address}")
+                server_response = f"Messages acknowledged."
+                try:
+                    server_socket.sendto(server_response.encode(), client_address)
+                except Exception as e:
+                    print(f"[TCP-Server] Error sending response to client: {e}")
 
         except KeyboardInterrupt:
             print("UDP Server stopped.")
@@ -113,62 +117,109 @@ def start_udp_server(port):
 
     threading.Thread(target=server_thread, daemon=True).start()
 
+# ==================== TCP-Client ====================
+
 def start_tcp_client(ip, port, n_packages, message):
-    """Start a TCP client."""
-    try:
-        address_family = socket.AF_INET
-        client_socket = socket.socket(address_family, socket.SOCK_STREAM)
-        client_socket.connect((ip, port))
-        print(f"Connected to TCP server {ip}:{port}")
+    def client_thread():
+        client_socket = None
 
-        for i in range(n_packages):
-            # Send message with newline
-            client_socket.sendall((message + "\n").encode())
-            print(f"Package {i + 1} sent to server {ip}:{port}")
+        try:
+            address_family = socket.AF_INET
+            client_socket = socket.socket(address_family, socket.SOCK_STREAM)
+            client_socket.connect((ip, port))
+            ref_time = None
+            print(f"Connected to TCP server {ip}:{port}")
 
-        # Optionally, shutdown the write side of the connection to signal the server that we are done
-        client_socket.shutdown(socket.SHUT_WR)
+            for i in range(n_packages):
+                send_time = time.time() * 1000
 
-        # Receive the final response from the server
-        response = client_socket.recv(1024).decode()
-        print(f"TCP Server responded: {response}")
+                if ref_time is None:
+                    ref_time = send_time
+                    # Send message with newline
+                    client_socket.sendall((message + "\n").encode())
+                    print(f"[TCP-Client][P#{i+1}] First packet: No IAT calculated.")
+                else:
+                    iat = send_time - ref_time
+                    ref_time = send_time
+                    client_socket.sendall((message + "\n").encode())
+                    print(f"[TCP-Client][P#{i+1}] Inter-Arrival-Time (IAT): {iat} ms")
 
-    except Exception as e:
-        print(f"Error connecting to TCP server: {e}")
-    finally:
-        client_socket.close()
-        print("Connection closed.")
+            # Shutdown write side of connection to signal the server we are done
+            client_socket.shutdown(socket.SHUT_WR)
+            client_socket.settimeout(5.0)
+            try:
+                # Receive the final response from the server
+                response = client_socket.recv(1024).decode()
+                print(f"TCP Server responded: {response}")
+            except socket.timeout:
+                print("No response from server within 5 seconds. Closing socket.")
 
+        except Exception as e:
+            print(f"Error connecting to TCP server: {e}")
+        finally:
+            if client_socket:
+                client_socket.close()
+                print("Connection closed.")
 
+    threading.Thread(target=client_thread, daemon=True).start()
+
+# ==================== UDP-Client ====================
 def start_udp_client(ip, port, n_packages, message):
-    """Start a UDP client."""
-    try:
-        client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        server_address = (ip, port)
+    def client_thread():
+        client_socket = None
 
-        for i in range(n_packages):
-            # Send message to the server
-            client_socket.sendto(message.encode(), server_address)
-            print(f"Package {i + 1} sent to server {ip}:{port}")
+        try:
+            client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            server_address = (ip, port)
+            ref_time = None
 
-        # Wait for a response after sending all packages
-        response, server_address = client_socket.recvfrom(1024)
-        print(f"UDP Server responded from {server_address}: {response.decode()}")
+            for i in range(n_packages):
+                send_time = time.time() * 1000
 
-    except Exception as e:
-        print(f"Error during UDP communication: {e}")
-    finally:
-        client_socket.close()
+                if ref_time is None:
+                    ref_time = send_time
+                    # Send message to the server
+                    client_socket.sendto(message.encode(), server_address)
+                    print(f"[TCP-Client][P#{i+1}] First packet: No IAT calculated.")
+                else:
+                    iat = send_time - ref_time
+                    ref_time = send_time
+                    client_socket.sendto(message.encode(), server_address)
+                    print(f"[TCP-Client][P#{i+1}] Inter-Arrival-Time (IAT): {iat} ms")
 
+                # Set timeout for waiting for a response
+                client_socket.settimeout(5.0)
+                try:
+                    # Wait for a response after sending all packages
+                    response, server_address = client_socket.recvfrom(1024)
+                    print(f"[Server {server_address}] Response: {response.decode()}")
+                except socket.timeout:
+                    print("No response from server within 5 seconds. Closing socket.")
+
+        except Exception as e:
+            print(f"Error during UDP communication: {e}")
+        finally:
+            if client_socket:
+                client_socket.close()
+                print("Socket closed.")
+
+    threading.Thread(target=client_thread, daemon=True).start()
+
+# ==================== Main ====================
 def main():
+    menu = """
+Select mode:
+1. Start TCP Server
+2. Start TCP Client
+3. Start UDP Server
+4. Start UDP Client
+5. Exit
+Enter mode (1, 2, 3, 4, or 5):
+"""
+    print(menu)
+
     while True:
-        print("\nSelect mode: ")
-        print("1. Start TCP Server")
-        print("2. Start TCP Client")
-        print("3. Start UDP Server")
-        print("4. Start UDP Client")
-        print("5. Exit")
-        mode = input("Enter mode (1, 2, 3, 4, or 5): ").strip()
+        mode = input("$ ").strip()
 
         if mode == "1":
             # TCP Server Mode
@@ -177,7 +228,8 @@ def main():
                 print("Starting TCP Server...")
                 start_tcp_server(port)
             except ValueError:
-                print("Invalid port number. Please try again.")
+                print("Invalid port number. Please try again.\n")
+
         elif mode == "2":
             # TCP Client Mode
             try:
@@ -185,10 +237,11 @@ def main():
                 port = int(input("Enter TCP server port: ").strip())
                 n_packages = int(input("Enter nPackets: ").strip())
                 message = input("Enter message to send to TCP server: ").strip()
-                print("Starting TCP Client...")
+                print("\nStarting TCP Client...")
                 start_tcp_client(ip, port, n_packages, message)
             except ValueError:
-                print("Invalid input. Please check the IP, port, or message and try again.")
+                print("Invalid input. Please check the IP, port, or message and try again.\n")
+
         elif mode == "3":
             # UDP Server Mode
             try:
@@ -196,7 +249,8 @@ def main():
                 print("Starting UDP Server...")
                 start_udp_server(port)
             except ValueError:
-                print("Invalid port number. Please try again.")
+                print("Invalid port number. Please try again.\n")
+
         elif mode == "4":
             # UDP Client Mode
             try:
@@ -204,17 +258,19 @@ def main():
                 port = int(input("Enter UDP server port: ").strip())
                 n_packages = int(input("Enter nPackets: ").strip())
                 message = input("Enter message to send to UDP server: ").strip()
-                print("Starting UDP Client...")
+                print("\nStarting UDP Client...")
                 start_udp_client(ip, port, n_packages, message)
             except ValueError:
-                print("Invalid input. Please check the IP, port, or message and try again.")
+                print("Invalid input. Please check the IP, port, or message and try again.\n")
+
         elif mode == "5":
             print("Exiting program.")
             break
         else:
-            print("Invalid choice. Please try again.")
+            print("Invalid choice. Please try again.\n")
 
+        # Delay before printing next input
+        time.sleep(0.5)
 
 if __name__ == "__main__":
     main()
-4
