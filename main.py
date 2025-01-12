@@ -11,7 +11,7 @@ def start_tcp_server(port):
         server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         server_socket.bind((bind_address, port))
         server_socket.listen(5)
-        print(f"TCP Server listening on port {port}...")
+        print(f"TCP Server listening on port {port}... \n")
 
         try:
             while True:
@@ -21,9 +21,9 @@ def start_tcp_server(port):
                 try:
                     # Initialize variables for IAT calculation
                     ref_time = None
+                    packet_count = 0
 
                     while True:
-                        packet_count = 0
                         # Receive a message from the client
                         message = client_socket.recv(1024).decode()
                         if not message:  # Client disconnected
@@ -37,19 +37,20 @@ def start_tcp_server(port):
                             ref_time = recv_time
                             packet_count = 1
                             print(f"[TCP-Server][P#{packet_count}] First packet: No IAT calculated.")
-                            print(f"[TCP-Client][P#{packet_count}] {message}.")
+                            print(f"[TCP-Client]{message}.")
                         else:
                             # Calculate IAT
                             iat = recv_time - ref_time
                             ref_time = recv_time
                             packet_count += 1
                             print(f"[TCP-Server][P#{packet_count}] Inter-Arrival-Time (IAT): {iat} ms.")
-                            print(f"[TCP-Client][P#{packet_count}] {message}.")
+                            print(f"[TCP-Client]{message}.")
 
                         # Respond to the client
-                        server_response = f"Messages acknowledged."
+                        server_response = f"[ACK] Messages acknowledged.\n"
                         try:
                             client_socket.sendall(server_response.encode())
+                            #print(f"[TCP-Server]{server_response}.")
                         except Exception as e:
                             print(f"[TCP-Server] Error sending response to client: {e}")
 
@@ -58,6 +59,7 @@ def start_tcp_server(port):
                 finally:
                     client_socket.close()
                     print(f"Connection with {client_address} closed.\n")
+
         except KeyboardInterrupt:
             print("TCP Server stopped.")
         finally:
@@ -73,19 +75,21 @@ def start_udp_server(port):
         server_socket = socket.socket(address_family, socket.SOCK_DGRAM)
         server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         bind_address = "0.0.0.0"
+        response_address = None
         server_socket.bind((bind_address, port))
-        print(f"UDP Server listening on port {port}...")
+        print(f"UDP Server listening on port {port}... \n")
 
         try:
             # Initialize variables
             ref_time = None
+            packet_count = 0
 
             while True:
-                packet_count = 0
                 # Receive a message and the client's address
                 message, client_address = server_socket.recvfrom(1024)
+                response_address = client_address
                 recv_time = time.time() * 1000  # Current time in milliseconds
-                decoded_message = message.decode()
+                message = message.decode()
 
                 # Process IAT calculation
                 if ref_time is None:
@@ -93,21 +97,23 @@ def start_udp_server(port):
                     ref_time = recv_time
                     packet_count = 1
                     print(f"[UDP-Server][P#{packet_count}] First packet: No IAT calculated.")
-                    print(f"[UDP-Client][P#{packet_count}] {message}.")
+                    print(f"[UDP-Client]{message}.")
                 else:
                     # Calculate IAT for subsequent packets
                     iat = recv_time - ref_time
                     ref_time = recv_time
                     packet_count += 1
                     print(f"[UDP-Server][P#{packet_count}] Inter-Arrival-Time (IAT): {iat} ms.")
-                    print(f"[UDP-Client][P#{packet_count}] {message}.")
+                    print(f"[UDP-Client]{message}.")
 
                 # Respond to the client
-                server_response = f"Messages acknowledged."
-                try:
-                    server_socket.sendto(server_response.encode(), client_address)
-                except Exception as e:
-                    print(f"[TCP-Server] Error sending response to client: {e}")
+                server_response = f"[ACK] Messages acknowledged."
+                if response_address:
+                    try:
+                        server_socket.sendto(server_response.encode(), response_address)
+                        #print(f"[UDP-Server]{server_response}.")
+                    except Exception as e:
+                        print(f"[UDP-Server] Error sending response to client: {e}")
 
         except KeyboardInterrupt:
             print("UDP Server stopped.")
@@ -128,7 +134,7 @@ def start_tcp_client(ip, port, n_packages, message):
             client_socket = socket.socket(address_family, socket.SOCK_STREAM)
             client_socket.connect((ip, port))
             ref_time = None
-            print(f"Connected to TCP server {ip}:{port}")
+            print(f"Connected to TCP-Server {ip}:{port}")
 
             for i in range(n_packages):
                 send_time = time.time() * 1000
@@ -150,7 +156,7 @@ def start_tcp_client(ip, port, n_packages, message):
             try:
                 # Receive the final response from the server
                 response = client_socket.recv(1024).decode()
-                print(f"TCP Server responded: {response}")
+                print(f"[TCP-Server]{response}")
             except socket.timeout:
                 print("No response from server within 5 seconds. Closing socket.")
 
@@ -159,7 +165,7 @@ def start_tcp_client(ip, port, n_packages, message):
         finally:
             if client_socket:
                 client_socket.close()
-                print("Connection closed.")
+                print(f"Disconnected from TCP-Server {ip}:{port}")
 
     threading.Thread(target=client_thread, daemon=True).start()
 
@@ -180,21 +186,22 @@ def start_udp_client(ip, port, n_packages, message):
                     ref_time = send_time
                     # Send message to the server
                     client_socket.sendto(message.encode(), server_address)
-                    print(f"[TCP-Client][P#{i+1}] First packet: No IAT calculated.")
+                    print(f"[UDP-Client][P#{i+1}] First packet: No IAT calculated.")
                 else:
                     iat = send_time - ref_time
                     ref_time = send_time
                     client_socket.sendto(message.encode(), server_address)
-                    print(f"[TCP-Client][P#{i+1}] Inter-Arrival-Time (IAT): {iat} ms")
+                    print(f"[UDP-Client][P#{i+1}] Inter-Arrival-Time (IAT): {iat} ms")
 
                 # Set timeout for waiting for a response
-                client_socket.settimeout(5.0)
-                try:
-                    # Wait for a response after sending all packages
-                    response, server_address = client_socket.recvfrom(1024)
-                    print(f"[Server {server_address}] Response: {response.decode()}")
-                except socket.timeout:
-                    print("No response from server within 5 seconds. Closing socket.")
+                if i is n_packages-1:
+                    #client_socket.settimeout(5.0)
+                    try:
+                        # Wait for a response after sending all packages
+                        response, server_address = client_socket.recvfrom(1024)
+                        print(f"[UDP-Server] {response.decode()}")
+                    except socket.timeout:
+                        print("No response from server within 5 seconds. Closing socket.")
 
         except Exception as e:
             print(f"Error during UDP communication: {e}")
@@ -215,6 +222,7 @@ Select mode:
 4. Start UDP Client
 5. Exit
 Enter mode (1, 2, 3, 4, or 5):
+==================================================
 """
     print(menu)
 
